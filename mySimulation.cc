@@ -55,6 +55,7 @@ int main (int argc, char *argv[])
 
     cmd.Parse (argc, argv);
 
+    
     //
     // Explicility create the nodes required by the topology shown above.
     //
@@ -67,6 +68,18 @@ int main (int argc, char *argv[])
     NodeContainer n2n5 = NodeContainer (c.Get (2), c.Get (5));
     NodeContainer n3n5 = NodeContainer (c.Get (3), c.Get (5));
     NodeContainer n4n5 = NodeContainer (c.Get (4), c.Get (5));
+
+    //
+    // Select TCP variant
+    //
+    TypeId tid_0 = TypeId::LookupByName ("ns3::TcpVeno");
+    std::string specificNode_0 = "/NodeList/0/$ns3::TcpL4Protocol/SocketType";
+    Config::Set (specificNode_0, TypeIdValue (tid_0));
+
+    TypeId tid_1 = TypeId::LookupByName ("ns3::TcpBic");
+    std::string specificNode_1 = "/NodeList/1/$ns3::TcpL4Protocol/SocketType";
+    Config::Set (specificNode_1, TypeIdValue (tid_1));
+    
 
     //
     // Install Internet Stack
