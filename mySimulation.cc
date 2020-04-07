@@ -42,19 +42,59 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE ("MyLab2");
 
 
+uint64_t h1rxBytes = 0;
+uint64_t h2rxBytes = 0;
+
+
+void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, double myTime, std::ofstream* f1, std::ofstream* f2){
+    //std::cout << "Query" << std::endl;
+    monitor->CheckForLostPackets ();
+    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (flowmon->GetClassifier ());
+    std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats ();
+    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
+    {
+        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
+        if (t.sourceAddress == "10.1.1.1"){
+            uint64_t rxBytes = i->second.rxBytes - h1rxBytes;
+            h1rxBytes = i->second.rxBytes;
+            *f1 << myTime <<"," <<rxBytes * 8.0 /0.1/1024/1024 << std::endl;
+        }
+        if (t.sourceAddress == "10.1.2.1"){
+            uint64_t rxBytes = i->second.rxBytes - h2rxBytes;
+            h2rxBytes = i->second.rxBytes;
+            *f2 << myTime << "," << rxBytes * 8.0 /0.1/1024/1024 << std::endl;
+        }
+    }
+
+}
+
+
 int main (int argc, char *argv[])
 {
     std::string lat = "2ms";
     std::string rate = "500kb/s";
     uint32_t maxBytes = 3000000;
+    std::string cc1 = "ns3::TcpVeno";
+    std::string cc2 = "ns3::TcpBic";
+    std::string fHead = "Veno_Bic";
+    
 
     CommandLine cmd;
     cmd.AddValue ("latency", "P2P link latency in miliseconds", lat);
     cmd.AddValue ("rate", "P2P data rate in bps", rate);
     cmd.AddValue ("maxBytes", "Total number of bytes for application to send", maxBytes);
+    cmd.AddValue ("cc1", "cc algo 1", cc1);
+    cmd.AddValue ("cc2", "cc algo 2", cc2);
+    cmd.AddValue ("fHead", "output file head name", fHead);
+
 
     cmd.Parse (argc, argv);
 
+    std::ofstream h1file("output/"+fHead+"_h1.txt");
+    std::ofstream h2file("output/"+fHead+"_h2.txt"); 
+
+    h1file << "time,throughput" << std::endl;
+    h2file << "time,throughput" << std::endl;
     
     //
     // Explicility create the nodes required by the topology shown above.
@@ -72,11 +112,12 @@ int main (int argc, char *argv[])
     //
     // Select TCP variant
     //
-    TypeId tid_0 = TypeId::LookupByName ("ns3::TcpVeno");
+
+    TypeId tid_0 = TypeId::LookupByName (cc1);
     std::string specificNode_0 = "/NodeList/0/$ns3::TcpL4Protocol/SocketType";
     Config::Set (specificNode_0, TypeIdValue (tid_0));
 
-    TypeId tid_1 = TypeId::LookupByName ("ns3::TcpBic");
+    TypeId tid_1 = TypeId::LookupByName (cc2);
     std::string specificNode_1 = "/NodeList/1/$ns3::TcpL4Protocol/SocketType";
     Config::Set (specificNode_1, TypeIdValue (tid_1));
     
@@ -137,7 +178,7 @@ int main (int argc, char *argv[])
     BulkSendHelper source_2 ("ns3::TcpSocketFactory", InetSocketAddress (i3i5.GetAddress (0), port));
     source_2.SetAttribute ("MaxBytes", UintegerValue (maxBytes));
     sourceApps.Add (source_2.Install (c.Get (1)));
-    sourceApps.Start (Seconds (1.0));
+    sourceApps.Start (Seconds (0.0));
     sourceApps.Stop (Seconds (10.0));
 
     PacketSinkHelper sink_1 ("ns3::TcpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), port));
@@ -165,21 +206,20 @@ int main (int argc, char *argv[])
     //
     NS_LOG_INFO ("Run Simulation.");
     Simulator::Stop (Seconds (10.0));
-    Simulator::Run ();
 
-    monitor->CheckForLostPackets ();
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (flowmon.GetClassifier ());
-    std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats ();
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
-    {
-        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
-        std::cout << "Flow " << i->first << " (" << t.sourceAddress << " ->" << t.destinationAddress << ")\n";
-        std::cout << "  Tx Bytes:    " << i->second.txBytes << "\n";
-        std::cout << "  Rx Bytes:    " << i->second.rxBytes << "\n";
-        std::cout << "  Throughput:  " << i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds() - i->second.timeFirstTxPacket.GetSeconds())/1024/1024 << " Mbps\n";
+    for (int i = 0; i < 100; i ++){
+        double myTime = 0.1 * i;
+        Simulator::Schedule(Seconds(myTime), &query_throughput, &flowmon, monitor, myTime, &h1file, &h2file);
     }
+    
+
+    Simulator::Run ();
+    
+
 
     Simulator::Destroy ();
+    h1file.close();
+    h2file.close();
 
     NS_LOG_INFO ("Done.");
 
