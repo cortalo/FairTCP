@@ -44,7 +44,7 @@
  NS_LOG_COMPONENT_DEFINE ("MyLab3");
  
 
- static const uint32_t totalTxBytes = 8000000;
+ static const uint32_t totalTxBytes = 1000000;
  static uint32_t currentTxBytes = 0;
  static const uint32_t writeSize = 1040;
  uint8_t data[writeSize]; 
@@ -55,7 +55,7 @@
 uint64_t h2rxBytes = 0;
 
 
-void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, double myTime, std::ofstream* f1, std::ofstream* f2){
+void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, double myTime, double dur, std::ofstream* f1, std::ofstream* f2){
     //std::cout << "Query" << std::endl;
     monitor->CheckForLostPackets ();
     Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (flowmon->GetClassifier ());
@@ -66,12 +66,12 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
         if (t.sourceAddress == "10.1.1.1"){
             uint64_t rxBytes = i->second.rxBytes - h1rxBytes;
             h1rxBytes = i->second.rxBytes;
-            *f1 << myTime <<"," <<rxBytes * 8.0 /0.1/1024/1024 << std::endl;
+            *f1 << myTime <<"," <<rxBytes * 8.0 /dur/1024/1024 << std::endl;
         }
         if (t.sourceAddress == "10.1.2.1"){
             uint64_t rxBytes = i->second.rxBytes - h2rxBytes;
             h2rxBytes = i->second.rxBytes;
-            *f2 << myTime << "," << rxBytes * 8.0 /0.1/1024/1024 << std::endl;
+            *f2 << myTime << "," << rxBytes * 8.0 /dur/1024/1024 << std::endl;
         }
     }
 
@@ -87,10 +87,14 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
    //  LogComponentEnable("TcpSocketImpl", LOG_LEVEL_ALL);
    //  LogComponentEnable("PacketSink", LOG_LEVEL_ALL);
    //  LogComponentEnable("TcpLargeTransfer", LOG_LEVEL_ALL);
-    //LogComponentEnable("TcpVegas", LOG_LEVEL_LOGIC);
+    LogComponentEnable("TcpVegas", LOG_LEVEL_LOGIC);
     std::string fHead = "test";
     std::string cc1 = "ns3::TcpVegas";
     std::string cc2 = "ns3::TcpNewReno";
+    std::string access_bandwidth = "10Mbps";
+    std::string access_delay = "45ms";
+    std::string bottle_bandwidth = "1Mbps";
+    std::string bottle_delay = "5ms";
 
 
     CommandLine cmd;
@@ -136,17 +140,20 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     // Create channels
     //
     NS_LOG_INFO ("Create channels.");
-    PointToPointHelper p2p;
-    p2p.SetQueue ("ns3::DropTailQueue", "MaxSize", StringValue ("50p"));
-    p2p.SetDeviceAttribute ("DataRate", DataRateValue (DataRate (10000000)));
-    p2p.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (10)));
-    NetDeviceContainer d0d4 = p2p.Install (n0n4);
-    NetDeviceContainer d1d4 = p2p.Install (n1n4);
-    NetDeviceContainer d2d5 = p2p.Install (n2n5);
-    NetDeviceContainer d3d5 = p2p.Install (n3n5);
+    PointToPointHelper LocalLink;
+    //p2p.SetQueue ("ns3::DropTailQueue", "MaxBytes", StringValue ("100000"));
+    LocalLink.SetDeviceAttribute ("DataRate", StringValue(access_bandwidth));
+    LocalLink.SetChannelAttribute ("Delay", StringValue(access_delay));
+    NetDeviceContainer d0d4 = LocalLink.Install (n0n4);
+    NetDeviceContainer d1d4 = LocalLink.Install (n1n4);
+    NetDeviceContainer d2d5 = LocalLink.Install (n2n5);
+    NetDeviceContainer d3d5 = LocalLink.Install (n3n5);
 
-    p2p.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (100)));
-    NetDeviceContainer d4d5 = p2p.Install (n4n5);
+    PointToPointHelper BottleLink;
+    BottleLink.SetDeviceAttribute ("DataRate", StringValue(bottle_bandwidth));
+    BottleLink.SetChannelAttribute ("Delay", StringValue(bottle_delay));
+    //p2p.SetQueue ("ns3::DropTailQueue", "MaxBytes", StringValue ("3750"));
+    NetDeviceContainer d4d5 = BottleLink.Install (n4n5);
  
 
     //
@@ -211,9 +218,10 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     //
     FlowMonitorHelper flowmon;
     Ptr<FlowMonitor> monitor = flowmon.InstallAll();
-    for (int i = 0; i < 40; i ++){
-        double myTime = 1 * i;
-        Simulator::Schedule(Seconds(myTime), &query_throughput, &flowmon, monitor, myTime, &h1file, &h2file);
+    for (int i = 0; i < 400; i ++){
+        double myTime = 0.1 * i;
+        double dur = 0.1;
+        Simulator::Schedule(Seconds(myTime), &query_throughput, &flowmon, monitor, myTime, dur , &h1file, &h2file);
     }
 
     Simulator::Stop (Seconds (1000));
