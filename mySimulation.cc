@@ -23,9 +23,9 @@
 //                  |        |
 //            n1 ---+        +--- n3
 //
-// - All links are p2p with 10Mb/s and 10ms
-// - TCP flow from n0 to n2
-// - TCP flow from n1 to n3
+// - Access Link:       1000Mbps, 450ms
+// - Bottleneck Link:      1Mbps,  50ms
+// - Access Link has 10x times buffer than bottleneck link.
  
  #include <iostream>
  #include <fstream>
@@ -57,7 +57,6 @@
 
 
 void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, double myTime, double dur, std::ofstream* f1, int flowNum){
-    //std::cout << "Query" << std::endl;
     monitor->CheckForLostPackets ();
     Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (flowmon->GetClassifier ());
     std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats ();
@@ -95,6 +94,8 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     std::string access_delay = "450ms";
     std::string bottle_bandwidth = "1Mbps";
     std::string bottle_delay = "50ms";
+    double bufferFactor = 1;
+
     int flowNum = 2;
     for (int i = 0; i < 100; i++){
         rxBytes[i] = 0;
@@ -107,11 +108,17 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     cmd.AddValue ("cc2", "cc algo 2", cc2);
     cmd.AddValue ("flowNum", "flowNum", flowNum);
     cmd.AddValue ("fHead", "output file head name", fHead);
+    cmd.AddValue ("bufferFactor", "bufferFactor", bufferFactor);
     cmd.Parse (argc, argv);
 
     std::ofstream h1file("output/"+fHead+".txt");
 
     h1file << "sourceAddress,ccAlgo,time,throughput" << std::endl;
+    DataRate bottle_b (bottle_bandwidth);
+    Time access_d (access_delay);
+    Time bottle_d (bottle_delay);
+    uint32_t bufferSize = static_cast<uint32_t> ( (bottle_b.GetBitRate () / 8) * ((access_d + bottle_d)*2).GetSeconds () );
+    bufferSize = bufferSize * bufferFactor;
  
     // initialize the tx buffer.
     for(uint32_t i = 0; i < writeSize; ++i)
@@ -127,11 +134,6 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     NodeContainer c;
     c.Create(2+flowNum*2);
 
-    /*NodeContainer n0n4 = NodeContainer (c.Get (0), c.Get (4));
-    NodeContainer n1n4 = NodeContainer (c.Get (1), c.Get (4));
-    NodeContainer n2n5 = NodeContainer (c.Get (2), c.Get (5));
-    NodeContainer n3n5 = NodeContainer (c.Get (3), c.Get (5));
-    NodeContainer n4n5 = NodeContainer (c.Get (4), c.Get (5));*/
 
     //
     // Install Internet Stack
@@ -145,7 +147,7 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     //
     NS_LOG_INFO ("Create channels.");
     PointToPointHelper LocalLink;
-    LocalLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, 125000000)));
+    LocalLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, 10*bufferSize)));
     LocalLink.SetDeviceAttribute ("DataRate", StringValue(access_bandwidth));
     LocalLink.SetChannelAttribute ("Delay", StringValue(access_delay));
     Ptr<Node> gateWay1 = c.Get (2*flowNum);
@@ -158,16 +160,11 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
         devCon.Add (LocalLink.Install (c.Get (flowNum+i), gateWay2));
     }
 
-   /* NetDeviceContainer d0d4 = LocalLink.Install (n0n4);
-    NetDeviceContainer d1d4 = LocalLink.Install (n1n4);
-    NetDeviceContainer d2d5 = LocalLink.Install (n2n5);
-    NetDeviceContainer d3d5 = LocalLink.Install (n3n5);*/
 
     PointToPointHelper BottleLink;
     BottleLink.SetDeviceAttribute ("DataRate", StringValue(bottle_bandwidth));
     BottleLink.SetChannelAttribute ("Delay", StringValue(bottle_delay));
-    BottleLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, 500000)));
-    //NetDeviceContainer d4d5 = BottleLink.Install (n4n5);
+    BottleLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, bufferSize)));
     devCon.Add (BottleLink.Install (gateWay1, gateWay2));
  
 
@@ -197,19 +194,6 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     tmpDevCon.Add (devCon.Get (4*flowNum+1));
     intCon.Add (ipv4.Assign (tmpDevCon));
 
-/*    Ipv4InterfaceContainer i0i4 = ipv4.Assign (d0d4);
-
-    ipv4.NewNetwork ();
-    Ipv4InterfaceContainer i1i4 = ipv4.Assign (d1d4);
-
-    ipv4.NewNetwork ();
-    Ipv4InterfaceContainer i4i5 = ipv4.Assign (d4d5);
-
-    ipv4.NewNetwork ();
-    Ipv4InterfaceContainer i2i5 = ipv4.Assign (d2d5);
-
-    ipv4.NewNetwork ();
-    Ipv4InterfaceContainer i3i5 = ipv4.Assign (d3d5);*/
    
     //
     // Turn on global static routing
@@ -228,8 +212,6 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     for (int i = 0; i < flowNum; i++){
         sinkApps.Add (sink.Install(c.Get(flowNum+i)));
     }
-    /*ApplicationContainer sinkApps = sink.Install (c.Get (2));
-    sinkApps.Add (sink.Install(c.Get (3)));*/
     sinkApps.Start (Seconds (0.0));
     sinkApps.Stop (Seconds (1000.0));
 
@@ -247,10 +229,6 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
             congesCont[i] = cc2;
         }
 
-
-        //nodeId = "";
-        //nodeId << c.Get (i)->GetId ();
-
         std::string specificNode = "/NodeList/" + std::to_string(i) + "/$ns3::TcpL4Protocol/SocketType";
         Config::Set (specificNode, TypeIdValue (tid));
         Ptr<Socket> localSocket = Socket::CreateSocket (c.Get (i), TcpSocketFactory::GetTypeId ());
@@ -259,34 +237,19 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     }
     
     
-    
-    
-    
-    
-    
 
-/*    tid = TypeId::LookupByName (cc2);
-    nodeId << c.Get (1)->GetId ();
-    specificNode = "/NodeList/" + nodeId.str () + "/$ns3::TcpL4Protocol/SocketType";
-    Config::Set (specificNode, TypeIdValue (tid));
-    localSocket = Socket::CreateSocket (c.Get (1), TcpSocketFactory::GetTypeId ());
-    localSocket->Bind ();
-    Simulator::ScheduleNow (&StartFlow, localSocket, i3i5.GetAddress (0), servPort);*/
     //
     // Calculate Throughput using Flowmonitor
     //
     FlowMonitorHelper flowmon;
     Ptr<FlowMonitor> monitor = flowmon.InstallAll();
-    for (int i = 0; i < 400; i ++){
+    for (int i = 0; i < 200; i ++){
         double myTime = 1 * i;
         double dur = 1;
         Simulator::Schedule(Seconds(myTime), &query_throughput, &flowmon, monitor, myTime, dur , &h1file, flowNum);
     }
 
     Simulator::Stop (Seconds (1000));
-
-    //LocalLink.EnablePcapAll ("LocalLink");
-    //BottleLink.EnablePcapAll("BottleLink");
 
     Simulator::Run ();
     Simulator::Destroy ();
