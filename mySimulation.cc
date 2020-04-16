@@ -23,8 +23,8 @@
 //                  |        |
 //            n1 ---+        +--- n3
 //
-// - Access Link:       1000Mbps, 450ms
-// - Bottleneck Link:      1Mbps,  50ms
+// - Access Link:       1000Mbps, 10ms
+// - Bottleneck Link:      1Mbps, 480ms
 // - Access Link has 10x times buffer than bottleneck link.
  
  #include <iostream>
@@ -44,7 +44,7 @@
  NS_LOG_COMPONENT_DEFINE ("MyLab3");
  
 
- static const uint32_t totalTxBytes = 10000000;
+ static const uint32_t totalTxBytes = 160000000;
  static uint32_t currentTxBytes = 0;
  static const uint32_t writeSize = 1040;
  uint8_t data[writeSize]; 
@@ -74,6 +74,10 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
 
 }
 
+void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, uint32_t n_packets)
+{
+    *stream->GetStream() << Simulator::Now().GetSeconds() << ',' << n_packets << std::endl;
+}
  
  
  int main (int argc, char *argv[])
@@ -85,15 +89,15 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
    //  LogComponentEnable("PacketSink", LOG_LEVEL_ALL);
    //  LogComponentEnable("TcpLargeTransfer", LOG_LEVEL_ALL);
     //LogComponentEnable("TcpVegas", LOG_LEVEL_LOGIC);
-    //LogComponentEnable("TcpCongestionOps", LOG_LEVEL_LOGIC);
+    //LogComponentEnable("TcpCongestionOps", LOG_LEVEL_ALL);
 
     std::string fHead = "test";
     std::string cc1 = "ns3::TcpNewReno";
     std::string cc2 = "ns3::TcpNewReno";
     std::string access_bandwidth = "1000Mbps";
-    std::string access_delay = "450ms";
+    std::string access_delay = "10ms";
     std::string bottle_bandwidth = "1Mbps";
-    std::string bottle_delay = "50ms";
+    std::string bottle_delay = "480ms";
     double bufferFactor = 1;
 
     int flowNum = 2;
@@ -109,16 +113,22 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     cmd.AddValue ("flowNum", "flowNum", flowNum);
     cmd.AddValue ("fHead", "output file head name", fHead);
     cmd.AddValue ("bufferFactor", "bufferFactor", bufferFactor);
+    cmd.AddValue ("access_bandwidth", "access_bandwidth", access_bandwidth);
+    cmd.AddValue ("access_delay", "access_delay", access_delay);
+    cmd.AddValue ("bottle_bandwidth", "bottle_bandwidth", bottle_bandwidth);
+    cmd.AddValue ("bottle_delay", "bottle_delay", bottle_delay);
     cmd.Parse (argc, argv);
 
     std::ofstream h1file("output/"+fHead+".txt");
 
     h1file << "sourceAddress,ccAlgo,time,throughput" << std::endl;
+
     DataRate bottle_b (bottle_bandwidth);
     Time access_d (access_delay);
     Time bottle_d (bottle_delay);
-    uint32_t bufferSize = static_cast<uint32_t> ( (bottle_b.GetBitRate () / 8) * ((access_d + bottle_d)*2).GetSeconds () );
+    uint32_t bufferSize = static_cast<uint32_t> ( (bottle_b.GetBitRate () / 8) * ((access_d + bottle_d + access_d)*2).GetSeconds () );
     bufferSize = bufferSize * bufferFactor;
+    double transTTR = ((access_d + access_d + bottle_d)*2).GetSeconds ();
  
     // initialize the tx buffer.
     for(uint32_t i = 0; i < writeSize; ++i)
@@ -213,7 +223,7 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
         sinkApps.Add (sink.Install(c.Get(flowNum+i)));
     }
     sinkApps.Start (Seconds (0.0));
-    sinkApps.Stop (Seconds (1000.0));
+    sinkApps.Stop (Seconds (4000.0));
 
 
 
@@ -243,17 +253,26 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
     //
     FlowMonitorHelper flowmon;
     Ptr<FlowMonitor> monitor = flowmon.InstallAll();
-    for (int i = 0; i < 200; i ++){
-        double myTime = 1 * i;
-        double dur = 1;
+    for (int i = 0; i < (2000/transTTR/4); i ++){
+        double myTime = 4 * i * transTTR;
+        double dur = 4 * transTTR;
         Simulator::Schedule(Seconds(myTime), &query_throughput, &flowmon, monitor, myTime, dur , &h1file, flowNum);
     }
 
-    Simulator::Stop (Seconds (1000));
+    AsciiTraceHelper asciiTraceHelper;
+    auto queuefile = asciiTraceHelper.CreateFileStream("output/"+fHead+"_queue1.csv");
+    *queuefile->GetStream() << "time" << ',' << "queueSize" << std::endl;
+    auto dev = DynamicCast<PointToPointNetDevice>(devCon.Get(4*flowNum));
+    dev->GetQueue()->TraceConnectWithoutContext(
+        "PacketsInQueue", MakeBoundCallback(&QueueMeasurement, queuefile));
+
+
+    Simulator::Stop (Seconds (4000));
 
     Simulator::Run ();
     Simulator::Destroy ();
     h1file.close();
+
 
     for (int i = 0 ; i < flowNum; i++){
         Ptr<PacketSink> pSink = DynamicCast<PacketSink> (sinkApps.Get (i));
