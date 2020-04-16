@@ -44,7 +44,7 @@
  NS_LOG_COMPONENT_DEFINE ("MyLab3");
  
 
- static const uint32_t totalTxBytes = 160000000;
+ static const uint32_t totalTxBytes = 100000000;
  static uint32_t currentTxBytes = 0;
  static const uint32_t writeSize = 1040;
  uint8_t data[writeSize]; 
@@ -96,7 +96,7 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
     std::string cc2 = "ns3::TcpNewReno";
     std::string access_bandwidth = "1000Mbps";
     std::string access_delay = "10ms";
-    std::string bottle_bandwidth = "1Mbps";
+    std::string bottle_bandwidth = "0.5Mbps";
     std::string bottle_delay = "480ms";
     double bufferFactor = 1;
 
@@ -157,9 +157,9 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
     //
     NS_LOG_INFO ("Create channels.");
     PointToPointHelper LocalLink;
-    LocalLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, 10*bufferSize)));
     LocalLink.SetDeviceAttribute ("DataRate", StringValue(access_bandwidth));
     LocalLink.SetChannelAttribute ("Delay", StringValue(access_delay));
+    LocalLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, 1500)));
     Ptr<Node> gateWay1 = c.Get (2*flowNum);
     Ptr<Node> gateWay2 = c.Get (2*flowNum+1);
     NetDeviceContainer devCon = NetDeviceContainer();
@@ -223,7 +223,7 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
         sinkApps.Add (sink.Install(c.Get(flowNum+i)));
     }
     sinkApps.Start (Seconds (0.0));
-    sinkApps.Stop (Seconds (4000.0));
+    sinkApps.Stop (Seconds (2000.0));
 
 
 
@@ -260,14 +260,15 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
     }
 
     AsciiTraceHelper asciiTraceHelper;
-    auto queuefile = asciiTraceHelper.CreateFileStream("output/"+fHead+"_queue1.csv");
+    auto queuefile = asciiTraceHelper.CreateFileStream("output/"+fHead+"_queue.csv");
     *queuefile->GetStream() << "time" << ',' << "queueSize" << std::endl;
     auto dev = DynamicCast<PointToPointNetDevice>(devCon.Get(4*flowNum));
     dev->GetQueue()->TraceConnectWithoutContext(
         "PacketsInQueue", MakeBoundCallback(&QueueMeasurement, queuefile));
 
+    //BottleLink.EnablePcapAll ("mylab3");
 
-    Simulator::Stop (Seconds (4000));
+    Simulator::Stop (Seconds (2000));
 
     Simulator::Run ();
     Simulator::Destroy ();
