@@ -41,11 +41,11 @@
  
  using namespace ns3;
  
- NS_LOG_COMPONENT_DEFINE ("MyLab3");
+ NS_LOG_COMPONENT_DEFINE ("FlowFin");
  
 
- static const uint32_t totalTxBytes = 100000000;
- static uint32_t currentTxBytes = 0;
+ //static const uint32_t totalTxBytes = 200000000;
+ //static uint32_t currentTxBytes = 0;
  static const uint32_t writeSize = 1040;
  uint8_t data[writeSize]; 
  void StartFlow (Ptr<Socket>, Ipv4Address, uint16_t);
@@ -53,6 +53,10 @@
 
  uint64_t rxBytes[100];
  std::string congesCont[100];
+ uint32_t totalTxBytes[100];
+ uint32_t currentTxBytes[100];
+
+ 
 
 
 
@@ -72,6 +76,24 @@ void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, dou
         }
     }
 
+}
+
+void query_fin_time (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, double myTime, std::ofstream* f1, int flowNum){
+    monitor->CheckForLostPackets ();
+    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (flowmon->GetClassifier ());
+    std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats ();
+    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
+    {
+        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
+        for (int j = 0; j < flowNum; j++){
+            if (t.sourceAddress == Ipv4Address(("10.1."+std::to_string(j)+".1").c_str() ) ) {
+                *f1 << t.sourceAddress << "," << congesCont[j] << "," << i->second.timeLastRxPacket << std::endl;
+                //uint64_t nowRxBytes = i->second.rxBytes - rxBytes[j];
+                //rxBytes[j] = i->second.rxBytes;
+                //*f1 << t.sourceAddress << ","  << congesCont[j] << "," << myTime <<"," <<nowRxBytes * 8.0 /dur/1024/1024 << std::endl;
+            }
+        }
+    }
 }
 
 void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, uint32_t n_packets)
@@ -96,7 +118,7 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
     std::string cc2 = "ns3::TcpNewReno";
     std::string access_bandwidth = "1000Mbps";
     std::string access_delay = "10ms";
-    std::string bottle_bandwidth = "0.5Mbps";
+    std::string bottle_bandwidth = "1Mbps";
     std::string bottle_delay = "480ms";
     double bufferFactor = 1;
 
@@ -104,6 +126,8 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
     for (int i = 0; i < 100; i++){
         rxBytes[i] = 0;
         congesCont[i] = "";
+        totalTxBytes[i] = 0;
+        currentTxBytes[i] = 0;
     }
 
 
@@ -119,9 +143,18 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
     cmd.AddValue ("bottle_delay", "bottle_delay", bottle_delay);
     cmd.Parse (argc, argv);
 
-    std::ofstream h1file("output/"+fHead+".txt");
-
+    std::ofstream h1file("output/"+fHead+"_thput.txt");
     h1file << "sourceAddress,ccAlgo,time,throughput" << std::endl;
+
+    std::ofstream finfile("output/"+fHead+"_finT.txt");
+    finfile << "sourceAddress,ccAlgo,finTime" << std::endl;
+
+    Config::SetDefault ("ns3::TcpSocket::RcvBufSize", UintegerValue (1 << 22));
+   	Config::SetDefault ("ns3::TcpSocket::SndBufSize", UintegerValue (1 << 22));
+
+    for (int i =0; i < flowNum; i++){
+      totalTxBytes[i] = 100000000/flowNum;
+    }
 
     DataRate bottle_b (bottle_bandwidth);
     Time access_d (access_delay);
@@ -259,6 +292,8 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
         Simulator::Schedule(Seconds(myTime), &query_throughput, &flowmon, monitor, myTime, dur , &h1file, flowNum);
     }
 
+    Simulator::Schedule(Seconds(1999), &query_fin_time, &flowmon, monitor, 1999, &finfile, flowNum);
+
     AsciiTraceHelper asciiTraceHelper;
     auto queuefile = asciiTraceHelper.CreateFileStream("output/"+fHead+"_queue.csv");
     *queuefile->GetStream() << "time" << ',' << "queueSize" << std::endl;
@@ -273,6 +308,7 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
     Simulator::Run ();
     Simulator::Destroy ();
     h1file.close();
+    finfile.close();
 
 
     for (int i = 0 ; i < flowNum; i++){
@@ -302,10 +338,13 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
  
  void WriteUntilBufferFull (Ptr<Socket> localSocket, uint32_t txSpace)
  {
-   while (currentTxBytes < totalTxBytes && localSocket->GetTxAvailable () > 0) 
+   Ptr<Node> thisNode = localSocket->GetNode ();
+   uint32_t flowIndex = thisNode->GetId ();
+   //std::cout << flowIndex << std::endl;
+   while (currentTxBytes[flowIndex] < totalTxBytes[flowIndex] && localSocket->GetTxAvailable () > 0) 
      {
-       uint32_t left = totalTxBytes - currentTxBytes;
-       uint32_t dataOffset = currentTxBytes % writeSize;
+       uint32_t left = totalTxBytes[flowIndex] - currentTxBytes[flowIndex];
+       uint32_t dataOffset = currentTxBytes[flowIndex] % writeSize;
        uint32_t toWrite = writeSize - dataOffset;
        toWrite = std::min (toWrite, left);
        toWrite = std::min (toWrite, localSocket->GetTxAvailable ());
@@ -315,11 +354,11 @@ void QueueMeasurement(Ptr<OutputStreamWrapper> stream, uint32_t n_packets_old, u
            // we will be called again when new tx space becomes available.
            return;
          }
-       currentTxBytes += amountSent;
+       currentTxBytes[flowIndex] += amountSent;
+
      }
-   if (currentTxBytes >= totalTxBytes)
+   if (currentTxBytes[flowIndex] >= totalTxBytes[flowIndex])
      {
-       // std::cout << "Transit Finish!" << std::endl;
        localSocket->Close ();
      }
  }
