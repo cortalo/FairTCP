@@ -40,6 +40,10 @@
  #include "ns3/point-to-point-module.h"
 #include "ns3/flow-monitor-module.h"
  #include "ns3/ipv4-global-routing-helper.h"
+#include "ns3/internet-apps-module.h"
+ #include "ns3/traffic-control-module.h"
+ #include "mytag.h"
+ #include "rr_queue_disc.h"
  
  using namespace ns3;
  
@@ -111,10 +115,10 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     PppHeader eth;
     pkt->RemoveHeader(eth);
     
-    /*if (eth.GetProtocol() != 0x0800)
+    if (eth.GetProtocol() != 0x0021)
     {
         return; // We are only interested in the IP packets.
-    }*/
+    }
     Ipv4Header ip;
     pkt->RemoveHeader(ip);
     auto prot = ip.GetProtocol();
@@ -128,6 +132,7 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     
     *stream << Simulator::Now().GetSeconds() << ',';
     ip.GetSource().Print(*stream);
+
     *stream << std::endl;
 }
  
@@ -244,6 +249,8 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     LocalLink_2.SetChannelAttribute ("Delay", StringValue(access_delay_2));
     LocalLink_2.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, 1500)));
 
+    
+
 
     Ptr<Node> gateWay1 = c.Get (2*flowNum);
     Ptr<Node> gateWay2 = c.Get (2*flowNum+1);
@@ -268,15 +275,23 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     }
 
 
-    NetDeviceContainer udpd0g1 = LocalLink_1.Install (udpNodes.Get (0), gateWay1);
-    NetDeviceContainer udpd1g2 = LocalLink_1.Install (udpNodes.Get (1), gateWay2);
+    
 
 
     PointToPointHelper BottleLink;
     BottleLink.SetDeviceAttribute ("DataRate", StringValue(bottle_bandwidth));
     BottleLink.SetChannelAttribute ("Delay", StringValue(bottle_delay));
-    BottleLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, bufferSize)));
-    devCon.Add (BottleLink.Install (gateWay1, gateWay2));
+    BottleLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize ("1p")));
+    
+    TrafficControlHelper tch;
+    tch.SetRootQueueDisc ("ns3::RRQueueDisc");
+    NetDeviceContainer tchDevice = BottleLink.Install (gateWay1, gateWay2);
+    tch.Install (tchDevice.Get (0));
+    devCon.Add (tchDevice);
+
+
+    NetDeviceContainer udpd0g1 = LocalLink_1.Install (udpNodes.Get (0), gateWay1);
+    NetDeviceContainer udpd1g2 = LocalLink_1.Install (udpNodes.Get (1), gateWay2);
  
 
     //
@@ -346,11 +361,13 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
             congesCont[i] = cc2;
         }
 
+        
+
         std::string specificNode = "/NodeList/" + std::to_string(i) + "/$ns3::TcpL4Protocol/SocketType";
         Config::Set (specificNode, TypeIdValue (tid));
         Ptr<Socket> localSocket = Socket::CreateSocket (c.Get (i), TcpSocketFactory::GetTypeId ());
         localSocket->Bind ();
-        double start_time = std::rand()%500;
+        double start_time = std::rand()%300;
         //std::cout << start_time << std::endl;
         Simulator::Schedule (Seconds(start_time),&StartFlow, localSocket, intCon.GetAddress (2*flowNum+2*i), servPort);
     }
@@ -430,14 +447,13 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
       dev->GetQueue()->TraceConnectWithoutContext(
           "Dequeue", MakeBoundCallback(&PktQueueMeasurement, dequeuefile));  
 
-      auto dropqueuefile = asciiTraceHelper.CreateFileStream("output/"+fHead+"_dropqueue.csv");
-      *dropqueuefile->GetStream() << "time" << ',' << "srcAddr"  << std::endl; 
+
+      auto queuesizefile = asciiTraceHelper.CreateFileStream("output/"+fHead+"_queuesize.csv");
+      *queuesizefile->GetStream() << "time" << ',' << "srcAddr"  << std::endl; 
       dev->GetQueue()->TraceConnectWithoutContext(
-          "DropBeforeEnqueue", MakeBoundCallback(&PktQueueMeasurement, dropqueuefile)); 
-      dev->GetQueue()->TraceConnectWithoutContext(
-          "DropAfterDequeue", MakeBoundCallback(&PktQueueMeasurement, dropqueuefile)); 
-      dev->GetQueue()->TraceConnectWithoutContext(
-          "Drop", MakeBoundCallback(&PktQueueMeasurement, dropqueuefile));
+          "PacketsInQueue", MakeBoundCallback(&QueueMeasurement, queuesizefile)); 
+
+      
 
 
     }
@@ -459,6 +475,7 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
         Ptr<PacketSink> pSink = DynamicCast<PacketSink> (sinkApps.Get (i));
         std::cout << "Total Bytes Received by flow "+std::to_string(i)+"   :" << pSink->GetTotalRx () << std::endl;
     }
+
     
  }
  
@@ -484,6 +501,8 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
  {
    Ptr<Node> thisNode = localSocket->GetNode ();
    uint32_t flowIndex = thisNode->GetId ();
+   uint8_t tag_value = flowIndex%2;
+
    //std::cout << flowIndex << std::endl;
    while (currentTxBytes[flowIndex] < totalTxBytes[flowIndex] && localSocket->GetTxAvailable () > 0) 
      {
@@ -492,7 +511,11 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
        uint32_t toWrite = writeSize - dataOffset;
        toWrite = std::min (toWrite, left);
        toWrite = std::min (toWrite, localSocket->GetTxAvailable ());
-       int amountSent = localSocket->Send (&data[dataOffset], toWrite, 0);
+       Ptr<Packet> pkt = Create<Packet> (&data[dataOffset], toWrite);
+       MyTag tag; tag.SetSimpleValue (tag_value);
+       pkt->AddPacketTag (tag);
+       int amountSent = localSocket->Send (pkt, 0);
+
        if(amountSent < 0)
          {
            // we will be called again when new tx space becomes available.
