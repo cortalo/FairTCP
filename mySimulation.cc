@@ -32,6 +32,7 @@
  #include <string>
  #include <stdlib.h>
  #include <time.h>
+ #include <vector>
  
  #include "ns3/core-module.h"
  #include "ns3/applications-module.h"
@@ -47,7 +48,7 @@
  
  using namespace ns3;
  
- NS_LOG_COMPONENT_DEFINE ("FlowFin");
+ NS_LOG_COMPONENT_DEFINE ("MySimu10");
  
 
  //static const uint32_t totalTxBytes = 200000000;
@@ -57,32 +58,17 @@
  void StartFlow (Ptr<Socket>, Ipv4Address, uint16_t);
  void WriteUntilBufferFull (Ptr<Socket>, uint32_t);
 
- uint64_t rxBytes[100];
- std::string congesCont[100];
- uint32_t totalTxBytes[100];
- uint32_t currentTxBytes[100];
+ uint64_t rxBytes[20000];
+ std::string congesCont[20000];
+ uint32_t totalTxBytes[20000];
+ uint32_t currentTxBytes[20000];
+
+ int algoNum = 12;
+ int flowPerAlgo = 100;
 
  
 
 
-
-void query_throughput (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, double myTime, double dur, std::ofstream* f1, int flowNum){
-    monitor->CheckForLostPackets ();
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (flowmon->GetClassifier ());
-    std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats ();
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
-    {
-        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
-        for (int j = 0; j < flowNum; j++){
-            if (t.sourceAddress == Ipv4Address(("10.1."+std::to_string(j)+".1").c_str() ) ) {
-                uint64_t nowRxBytes = i->second.rxBytes - rxBytes[j];
-                rxBytes[j] = i->second.rxBytes;
-                *f1 << t.sourceAddress << ","  << congesCont[j] << "," << myTime <<"," <<nowRxBytes * 8.0 /dur/1024/1024 << std::endl;
-            }
-        }
-    }
-
-}
 
 void query_fin_time (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, double myTime, std::ofstream* f1, int flowNum){
     monitor->CheckForLostPackets ();
@@ -91,14 +77,10 @@ void query_fin_time (FlowMonitorHelper* flowmon, Ptr<FlowMonitor> monitor, doubl
     for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
-        for (int j = 0; j < flowNum; j++){
-            if (t.sourceAddress == Ipv4Address(("10.1."+std::to_string(j)+".1").c_str() ) ) {
-                *f1 << t.sourceAddress << "," << congesCont[j] << "," << i->second.timeLastRxPacket  << "," << i->second.timeFirstTxPacket << std::endl;
-                //uint64_t nowRxBytes = i->second.rxBytes - rxBytes[j];
-                //rxBytes[j] = i->second.rxBytes;
-                //*f1 << t.sourceAddress << ","  << congesCont[j] << "," << myTime <<"," <<nowRxBytes * 8.0 /dur/1024/1024 << std::endl;
-            }
-        }
+        
+        *f1 << t.sourceAddress << "," << t.destinationPort << "," << i->second.timeLastRxPacket  << "," << i->second.timeFirstTxPacket << std::endl;
+        
+
     }
 }
 
@@ -135,6 +117,10 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
 
     *stream << std::endl;
 }
+
+void TimePrint(int i){
+  std::cout << i << std::endl;
+}
  
  
  int main (int argc, char *argv[])
@@ -149,22 +135,21 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     //LogComponentEnable("TcpCongestionOps", LOG_LEVEL_ALL);
 
     std::string fHead = "test";
-    std::string cc1 = "ns3::TcpNewReno";
-    std::string cc2 = "ns3::TcpNewReno";
+    std::vector<std::string> cc_vector = {"ns3::TcpBic","ns3::TcpNewReno","ns3::TcpHighSpeed"
+                                            ,"ns3::TcpHtcp","ns3::TcpHybla","ns3::TcpIllinois"
+                                            ,"ns3::TcpLedbat","ns3::TcpScalable","ns3::TcpVegas"
+                                            ,"ns3::TcpVeno","ns3::TcpWestwood","ns3::TcpYeah"};
     std::string access_bandwidth = "1000Mbps";
-    std::string access_delay_1 = "200ms";
-    std::string access_delay_2 = "50ms";
-    std::string bottle_bandwidth = "1Mbps";
-    std::string bottle_delay = "100ms";
-    double bufferFactor = 1;
+    std::string access_delay = "20ms";
+    std::string bottle_bandwidth = "100Mbps";
+    std::string bottle_delay = "10ms";
     bool udpFeature = 0;
     std::string udpOnTime = "1";
     std::string udpOffTime = "0";
-    bool enable_query_throughput = 0;
     bool enable_trace_queue = 0;
 
-    int flowNum = 2;
-    for (int i = 0; i < 100; i++){
+    
+    for (int i = 0; i < 5000; i++){
         rxBytes[i] = 0;
         congesCont[i] = "";
         totalTxBytes[i] = 0;
@@ -173,42 +158,31 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
 
 
     CommandLine cmd;
-    cmd.AddValue ("cc1", "cc algo 1", cc1);
-    cmd.AddValue ("cc2", "cc algo 2", cc2);
-    cmd.AddValue ("flowNum", "flowNum", flowNum);
+    cmd.AddValue ("algoNum", "algoNum", algoNum);
+    cmd.AddValue ("flowPerAlgo", "flowPerAlgo", flowPerAlgo);
     cmd.AddValue ("fHead", "output file head name", fHead);
-    cmd.AddValue ("bufferFactor", "bufferFactor", bufferFactor);
     cmd.AddValue ("access_bandwidth", "access_bandwidth", access_bandwidth);
-    cmd.AddValue ("access_delay_1", "access_delay_1", access_delay_1);
-    cmd.AddValue ("access_delay_2", "access_delay_2", access_delay_2);
+    cmd.AddValue ("access_delay", "access_delay", access_delay);
     cmd.AddValue ("bottle_bandwidth", "bottle_bandwidth", bottle_bandwidth);
     cmd.AddValue ("bottle_delay", "bottle_delay", bottle_delay);
     cmd.AddValue ("udpOnTime", "udpOnTime", udpOnTime);
     cmd.AddValue ("udpOffTime", "udpOffTime", udpOffTime);
     cmd.AddValue ("udpFeature", "0 disable, 1 enable", udpFeature);
-    cmd.AddValue ("enable_query_throughput","enable_query_throughput",enable_query_throughput);
     cmd.AddValue ("enable_trace_queue","enable_trace_queue",enable_trace_queue);
     cmd.Parse (argc, argv);
 
-    std::ofstream h1file("output/"+fHead+"_thput.txt");
-    h1file << "sourceAddress,ccAlgo,time,throughput" << std::endl;
 
     std::ofstream finfile("output/"+fHead+"_finT.txt");
-    finfile << "sourceAddress,ccAlgo,finTime,startTime" << std::endl;
+    finfile << "sourceAddress,destinationPort,finTime,startTime" << std::endl;
 
     Config::SetDefault ("ns3::TcpSocket::RcvBufSize", UintegerValue (1 << 22));
     Config::SetDefault ("ns3::TcpSocket::SndBufSize", UintegerValue (1 << 22));
 
-    for (int i =0; i < flowNum; i++){
-      totalTxBytes[i] = 50000000/flowNum;
+    for (int i =0; i < algoNum*flowPerAlgo; i++){
+      totalTxBytes[i] = 500000;
     }
 
-    DataRate bottle_b (bottle_bandwidth);
-    Time access_d (access_delay_1);
-    Time bottle_d (bottle_delay);
-    uint32_t bufferSize = static_cast<uint32_t> ( (bottle_b.GetBitRate () / 8) * ((access_d + bottle_d + access_d)*2).GetSeconds () );
-    bufferSize = bufferSize * bufferFactor;
-    double transTTR = ((access_d + access_d + bottle_d)*2).GetSeconds ();
+    
  
     // initialize the tx buffer.
     for(uint32_t i = 0; i < writeSize; ++i)
@@ -222,7 +196,7 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     //
     NS_LOG_INFO ("Create nodes.");
     NodeContainer c;
-    c.Create(2+flowNum*2);
+    c.Create(2+algoNum*2);
 
     NodeContainer udpNodes;
     udpNodes.Create(2);
@@ -239,39 +213,22 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     // Create channels
     //
     NS_LOG_INFO ("Create channels.");
-    PointToPointHelper LocalLink_1;
-    LocalLink_1.SetDeviceAttribute ("DataRate", StringValue(access_bandwidth));
-    LocalLink_1.SetChannelAttribute ("Delay", StringValue(access_delay_1));
-    LocalLink_1.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, 1500)));
-
-    PointToPointHelper LocalLink_2;
-    LocalLink_2.SetDeviceAttribute ("DataRate", StringValue(access_bandwidth));
-    LocalLink_2.SetChannelAttribute ("Delay", StringValue(access_delay_2));
-    LocalLink_2.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::BYTES, 1500)));
+    PointToPointHelper LocalLink;
+    LocalLink.SetDeviceAttribute ("DataRate", StringValue(access_bandwidth));
+    LocalLink.SetChannelAttribute ("Delay", StringValue(access_delay));
+    LocalLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize ("10p")));
 
     
 
 
-    Ptr<Node> gateWay1 = c.Get (2*flowNum);
-    Ptr<Node> gateWay2 = c.Get (2*flowNum+1);
+    Ptr<Node> gateWay1 = c.Get (2*algoNum);
+    Ptr<Node> gateWay2 = c.Get (2*algoNum+1);
     NetDeviceContainer devCon = NetDeviceContainer();
-    for (int i = 0; i < flowNum; i++){
-        if (i%2 == 0){
-          devCon.Add (LocalLink_1.Install (c.Get (i), gateWay1));
-        }
-
-        if (i%2 == 1){
-          devCon.Add (LocalLink_2.Install (c.Get (i), gateWay1));
-        }
-        
+    for (int i = 0; i < algoNum; i++){
+      devCon.Add (LocalLink.Install (c.Get (i), gateWay1));
     }
-    for (int i = 0; i < flowNum; i++){
-        if (i%2 == 0){
-          devCon.Add (LocalLink_1.Install (c.Get (flowNum+i), gateWay2));
-        }
-        if (i%2 == 1){
-          devCon.Add (LocalLink_2.Install (c.Get (flowNum+i), gateWay2));
-        }
+    for (int i = 0; i < algoNum; i++){
+        devCon.Add (LocalLink.Install (c.Get (algoNum+i), gateWay2));
     }
 
 
@@ -283,15 +240,19 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     BottleLink.SetChannelAttribute ("Delay", StringValue(bottle_delay));
     BottleLink.SetQueue ("ns3::DropTailQueue", "MaxSize", QueueSizeValue (QueueSize ("1p")));
     
-    TrafficControlHelper tch;
-    tch.SetRootQueueDisc ("ns3::RRQueueDisc");
+    
     NetDeviceContainer tchDevice = BottleLink.Install (gateWay1, gateWay2);
-    tch.Install (tchDevice.Get (0));
     devCon.Add (tchDevice);
 
+    TrafficControlHelper tch;
+    tch.SetRootQueueDisc ("ns3::RRQueueDisc");
+    tch.Install (tchDevice.Get (0));
+    
+    
 
-    NetDeviceContainer udpd0g1 = LocalLink_1.Install (udpNodes.Get (0), gateWay1);
-    NetDeviceContainer udpd1g2 = LocalLink_1.Install (udpNodes.Get (1), gateWay2);
+
+    NetDeviceContainer udpd0g1 = LocalLink.Install (udpNodes.Get (0), gateWay1);
+    NetDeviceContainer udpd1g2 = LocalLink.Install (udpNodes.Get (1), gateWay2);
  
 
     //
@@ -301,23 +262,23 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     Ipv4AddressHelper ipv4;
     Ipv4InterfaceContainer intCon = Ipv4InterfaceContainer ();
     ipv4.SetBase ("10.1.0.0", "255.255.255.0");
-    for (int i = 0; i < flowNum; i++){
+    for (int i = 0; i < algoNum; i++){
         NetDeviceContainer tmpDevCon = NetDeviceContainer ();
         tmpDevCon.Add (devCon.Get (2*i));
         tmpDevCon.Add (devCon.Get (2*i+1));
         intCon.Add (ipv4.Assign (tmpDevCon));
         ipv4.NewNetwork ();
     }
-    for (int i = 0; i < flowNum; i++){
+    for (int i = 0; i < algoNum; i++){
         NetDeviceContainer tmpDevCon = NetDeviceContainer ();
-        tmpDevCon.Add (devCon.Get (2*flowNum+2*i));
-        tmpDevCon.Add (devCon.Get (2*flowNum+2*i+1));
+        tmpDevCon.Add (devCon.Get (2*algoNum+2*i));
+        tmpDevCon.Add (devCon.Get (2*algoNum+2*i+1));
         intCon.Add (ipv4.Assign (tmpDevCon));
         ipv4.NewNetwork ();
     }
     NetDeviceContainer tmpDevCon = NetDeviceContainer ();
-    tmpDevCon.Add (devCon.Get (4*flowNum));
-    tmpDevCon.Add (devCon.Get (4*flowNum+1));
+    tmpDevCon.Add (devCon.Get (4*algoNum));
+    tmpDevCon.Add (devCon.Get (4*algoNum+1));
     intCon.Add (ipv4.Assign (tmpDevCon));
 
     ipv4.NewNetwork ();
@@ -338,39 +299,45 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
 
     NS_LOG_INFO ("Create Applications.");
 
-    uint16_t servPort = 50000;
-    PacketSinkHelper sink ("ns3::TcpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), servPort));
+    uint16_t servPort = 0;
     ApplicationContainer sinkApps = ApplicationContainer ();
-    for (int i = 0; i < flowNum; i++){
-        sinkApps.Add (sink.Install(c.Get(flowNum+i)));
+    for (uint16_t j = 1; j < (flowPerAlgo)+1; j++){
+      servPort = j;
+      PacketSinkHelper sink ("ns3::TcpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), servPort));
+      for (int i = 0; i < algoNum; i++){
+          sinkApps.Add (sink.Install(c.Get(algoNum+i)));
+      }
     }
+    
     sinkApps.Start (Seconds (0.0));
-    sinkApps.Stop (Seconds (4000.0));
+    sinkApps.Stop (Seconds (10000.0));
 
 
     std::srand((unsigned)time(NULL));
 
-    TypeId tid = TypeId::LookupByName (cc1);
-    std::stringstream nodeId;
-    for (int i = 0; i < flowNum; i++){
-        if (i%2 == 0){
-            tid = TypeId::LookupByName (cc1);
-            congesCont[i] = cc1;
-        }else{
-            tid = TypeId::LookupByName (cc2);
-            congesCont[i] = cc2;
-        }
-
+    TypeId tid = TypeId::LookupByName (cc_vector[0]);
+    for (int i = 0; i < algoNum; i++){
         
-
+        tid = TypeId::LookupByName (cc_vector[i%12]);
+        congesCont[i] = cc_vector[i%12];
         std::string specificNode = "/NodeList/" + std::to_string(i) + "/$ns3::TcpL4Protocol/SocketType";
         Config::Set (specificNode, TypeIdValue (tid));
-        Ptr<Socket> localSocket = Socket::CreateSocket (c.Get (i), TcpSocketFactory::GetTypeId ());
-        localSocket->Bind ();
-        double start_time = std::rand()%300;
-        //std::cout << start_time << std::endl;
-        Simulator::Schedule (Seconds(start_time),&StartFlow, localSocket, intCon.GetAddress (2*flowNum+2*i), servPort);
+
+        for (uint16_t j = 1; j < (flowPerAlgo)+1; j++){
+          servPort = j;
+          Ptr<Socket> localSocket = Socket::CreateSocket (c.Get (i), TcpSocketFactory::GetTypeId ());
+          localSocket->Bind ();
+          double start_time = std::rand()%1;
+          //std::cout << start_time << std::endl;
+          Simulator::Schedule (Seconds(start_time),&StartFlow, localSocket, intCon.GetAddress (2*algoNum+2*i), servPort);
+        }
+        
     }
+
+    for (int i = 0; i < 100; i++){
+      Simulator::Schedule (Seconds(i), &TimePrint, i);
+    }
+
 
     if (udpFeature){
       uint16_t udpPort = 4000;
@@ -392,26 +359,6 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     }
     
 
-
-/*    Address udpServerAddress = Address (udpi1g2.GetAddress (0));
-
-    uint16_t udpPort = 4000;
-    UdpServerHelper udpServer (udpPort);
-    ApplicationContainer udpApps = udpServer.Install (udpNodes.Get (1));
-    udpApps.Start (Seconds (300.0));
-    udpApps.Stop (Seconds (700.0));
-
-    uint32_t udpMaxPacketSize = 1024;
-    Time udpInterPacketInterval = Seconds (0.02);
-    uint32_t udpMaxPacketCount = 20000;
-    UdpClientHelper udpClient (udpServerAddress, udpPort);
-    udpClient.SetAttribute ("MaxPackets", UintegerValue (udpMaxPacketCount));
-    udpClient.SetAttribute ("Interval", TimeValue (udpInterPacketInterval));
-    udpClient.SetAttribute ("PacketSize", UintegerValue (udpMaxPacketSize));
-    udpApps = udpClient.Install (udpNodes.Get (0));
-    udpApps.Start (Seconds (300.0));
-    udpApps.Stop (Seconds (700.0));*/
-    
     
 
     //
@@ -419,21 +366,15 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
     //
     FlowMonitorHelper flowmon;
     Ptr<FlowMonitor> monitor = flowmon.InstallAll();
-    if (enable_query_throughput){
-      for (int i = 0; i < (2000/transTTR/4); i ++){
-          double myTime = 4 * i * transTTR;
-          double dur = 4 * transTTR;
-          Simulator::Schedule(Seconds(myTime), &query_throughput, &flowmon, monitor, myTime, dur , &h1file, flowNum);
-      }
-    }
 
-    Simulator::Schedule(Seconds(3999), &query_fin_time, &flowmon, monitor, 3999, &finfile, flowNum);
+
+    Simulator::Schedule(Seconds(9999), &query_fin_time, &flowmon, monitor, 9999, &finfile, flowPerAlgo*algoNum);
 
     if (enable_trace_queue){
       AsciiTraceHelper asciiTraceHelper;
       auto enqueuefile = asciiTraceHelper.CreateFileStream("output/"+fHead+"_enqueue.csv");
       *enqueuefile->GetStream() << "time" << ',' << "srcAddr"  << std::endl;
-      auto dev = DynamicCast<PointToPointNetDevice>(devCon.Get(4*flowNum));
+      auto dev = DynamicCast<PointToPointNetDevice>(devCon.Get(4*algoNum));
       //dev->GetQueue()->TraceConnectWithoutContext(
       //    "PacketsInQueue", MakeBoundCallback(&QueueMeasurement, queuefile)); 
 
@@ -461,20 +402,18 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
 
     //BottleLink.EnablePcapAll ("mylab3");
 
-    Simulator::Stop (Seconds (4000));
+    Simulator::Stop (Seconds (10000));
 
     Simulator::Run ();
     Simulator::Destroy ();
 
-    h1file.close();
-
     finfile.close();
 
 
-    for (int i = 0 ; i < flowNum; i++){
+/*    for (int i = 0 ; i < flowPerAlgo*algoNum; i++){
         Ptr<PacketSink> pSink = DynamicCast<PacketSink> (sinkApps.Get (i));
         std::cout << "Total Bytes Received by flow "+std::to_string(i)+"   :" << pSink->GetTotalRx () << std::endl;
-    }
+    }*/
 
     
  }
@@ -500,8 +439,18 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
  void WriteUntilBufferFull (Ptr<Socket> localSocket, uint32_t txSpace)
  {
    Ptr<Node> thisNode = localSocket->GetNode ();
-   uint32_t flowIndex = thisNode->GetId ();
-   uint8_t tag_value = flowIndex%2;
+   uint32_t algoID = thisNode->GetId ();
+   
+   Address* tmpAddress = new Address ();
+   localSocket->GetPeerName (*tmpAddress);
+   auto _tmpAddress = InetSocketAddress::ConvertFrom(*tmpAddress);
+   uint16_t portNum = _tmpAddress.GetPort();
+   uint16_t flowIndex = algoID*flowPerAlgo + portNum-1;
+   
+   uint32_t tag_value = 0;
+   if (portNum <= 10){
+    tag_value = algoID*1 + 1-1 + 1;
+   }
 
    //std::cout << flowIndex << std::endl;
    while (currentTxBytes[flowIndex] < totalTxBytes[flowIndex] && localSocket->GetTxAvailable () > 0) 
@@ -520,9 +469,10 @@ void PktQueueMeasurement(Ptr<OutputStreamWrapper> streamwrapper, Ptr<Packet cons
          {
            // we will be called again when new tx space becomes available.
            return;
+         }else{
+            currentTxBytes[flowIndex] += amountSent;
          }
-       currentTxBytes[flowIndex] += amountSent;
-
+       
      }
    if (currentTxBytes[flowIndex] >= totalTxBytes[flowIndex])
      {
