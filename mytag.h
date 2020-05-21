@@ -50,10 +50,10 @@ namespace ns3 {
    virtual void Print (std::ostream &os) const;
  
    // these are our accessors to our tag structure
-   void SetSimpleValue (uint8_t value);
-   uint8_t GetSimpleValue (void) const;
+   void SetSimpleValue (uint32_t value);
+   uint32_t GetSimpleValue (void) const;
  private:
-   uint8_t m_simpleValue;  
+   uint32_t m_simpleValue;  
  };
  
  TypeId 
@@ -66,7 +66,7 @@ namespace ns3 {
                     "A simple value",
                     EmptyAttributeValue (),
                     MakeUintegerAccessor (&MyTag::GetSimpleValue),
-                    MakeUintegerChecker<uint8_t> ())
+                    MakeUintegerChecker<uint32_t> ())
    ;
    return tid;
  }
@@ -96,11 +96,11 @@ namespace ns3 {
    os << "v=" << (uint32_t)m_simpleValue;
  }
  void 
- MyTag::SetSimpleValue (uint8_t value)
+ MyTag::SetSimpleValue (uint32_t value)
  {
    m_simpleValue = value;
  }
- uint8_t 
+ uint32_t 
  MyTag::GetSimpleValue (void) const
  {
    return m_simpleValue;
