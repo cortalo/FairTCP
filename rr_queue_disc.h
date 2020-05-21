@@ -36,6 +36,9 @@
 #include <iterator>
 #include <memory.h>
 
+#include <stdlib.h> 
+#include <time.h> 
+
 namespace ns3 {
 
 
@@ -70,8 +73,8 @@ private:
   virtual bool CheckConfig (void);
   virtual void InitializeParams (void);
 
-  uint8_t queue_num;
-  uint8_t now_queue_num;
+  uint32_t rr_queue_num;
+  uint32_t now_queue_num;
 };
 
 
@@ -109,14 +112,16 @@ RRQueueDisc::DoEnqueue (Ptr<QueueDiscItem> item)
 
   NS_LOG_FUNCTION (this << item);
   MyTag algoTag;
-  uint8_t algoNum = 0;
+  uint32_t algoNum = 0;
 
   if (item->GetPacket ()->PeekPacketTag (algoTag))
   {
   	algoNum = algoTag.GetSimpleValue ();
   }else{
-  	algoNum = now_queue_num;
+  	algoNum = 0;
   }
+
+  //std::cout << (uint32_t)algoNum << ",";
   
   bool retval = GetQueueDiscClass (algoNum)->GetQueueDisc ()->Enqueue (item);
 
@@ -133,15 +138,45 @@ RRQueueDisc::DoDequeue (void)
 
   Ptr<QueueDiscItem> item;
 
-  for (uint8_t i = 0; i < queue_num; i++){
-  	now_queue_num = (now_queue_num + 1)%queue_num;
-  	if ((item = GetQueueDiscClass (now_queue_num)->GetQueueDisc ()->Dequeue ()) != 0)
-  	{
-  		return item;
-      
-  	}
+  
+  int prob = std::rand()%10;
+
+
+  if (prob == 0){
+    //First dequeue rr-queue sets.
+    for (uint32_t i = 0; i < rr_queue_num; i++){
+        now_queue_num = (now_queue_num+1)%rr_queue_num;
+      if ((item = GetQueueDiscClass (now_queue_num + 1)->GetQueueDisc ()->Dequeue ()) != 0)
+      {
+        return item;
+      }
+    }
+    //Try dequeue main queue.
+    if ((item = GetQueueDiscClass (0)->GetQueueDisc ()->Dequeue ()) != 0)
+    {
+      return item;
+    }
 
   }
+  else{
+    //First dequeue main queue.
+    if ((item = GetQueueDiscClass (0)->GetQueueDisc ()->Dequeue ()) != 0)
+    {
+      return item;
+    }
+    //Try dequeue rr-queue sets.
+    for (uint32_t i = 0; i < rr_queue_num; i++){
+      now_queue_num = (now_queue_num+1)%rr_queue_num;
+      if ((item = GetQueueDiscClass (now_queue_num + 1)->GetQueueDisc ()->Dequeue ()) != 0)
+      {
+        return item;
+      }
+    }
+
+  }
+
+  
+
 
   return item;
 
@@ -155,15 +190,42 @@ RRQueueDisc::DoPeek (void)
 
   Ptr<const QueueDiscItem> item;
 
-  for (uint8_t i = 0; i < queue_num; i++){
-    now_queue_num = (now_queue_num + 1)%queue_num;
-    if ((item = GetQueueDiscClass (now_queue_num)->GetQueueDisc ()->Peek ()) != 0)
-    {
+  std::srand( (unsigned)time( NULL ) );
+  int prob = std::rand()%10;
 
+  if (prob == 0){
+    //First dequeue rr-queue sets.
+    for (uint32_t i = 0; i < rr_queue_num; i++){
+        now_queue_num = (now_queue_num+1)%rr_queue_num;
+      if ((item = GetQueueDiscClass (now_queue_num + 1)->GetQueueDisc ()->Peek ()) != 0)
+      {
+        return item;
+      }
+    }
+    //Try dequeue main queue.
+    if ((item = GetQueueDiscClass (0)->GetQueueDisc ()->Peek ()) != 0)
+    {
       return item;
     }
 
   }
+  else{
+    //First dequeue main queue.
+    if ((item = GetQueueDiscClass (0)->GetQueueDisc ()->Peek ()) != 0)
+    {
+      return item;
+    }
+    //Try dequeue rr-queue sets.
+    for (uint32_t i = 0; i < rr_queue_num; i++){
+      now_queue_num = (now_queue_num+1)%rr_queue_num;
+      if ((item = GetQueueDiscClass (now_queue_num + 1)->GetQueueDisc ()->Peek ()) != 0)
+      {
+        return item;
+      }
+    }
+
+  }
+
 
   return item;
 
@@ -173,20 +235,26 @@ bool
 RRQueueDisc::CheckConfig (void)
 {
   NS_LOG_FUNCTION (this);
+  std::srand( (unsigned)time( NULL ) );
   
   ObjectFactory factory;
   factory.SetTypeId ("ns3::FifoQueueDisc");
-  for (uint32_t i = 0; i < 32; i++)
+  for (uint32_t i = 0; i < 2000; i++)
   {
   	Ptr<QueueDisc> qd = factory.Create<QueueDisc> ();
   	qd->Initialize ();
-  	qd->SetMaxSize (QueueSize("50p"));
+    if (i == 0){
+      qd->SetMaxSize (QueueSize("10800p"));
+    }else{
+      qd->SetMaxSize (QueueSize("100p"));
+    }
+  	
   	Ptr<QueueDiscClass> c = CreateObject<QueueDiscClass> ();
   	c->SetQueueDisc (qd);
   	AddQueueDiscClass (c);
   }
 
-  queue_num = 2;
+  rr_queue_num = 12;
   now_queue_num = 0;
 
 
